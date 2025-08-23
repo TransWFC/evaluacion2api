@@ -1,0 +1,1 @@
+^RHC:\Users\trans\source\repos\LibrarySolution\LibraryAPI\LibraryAPI.csproj¢net8.0òCSharp12

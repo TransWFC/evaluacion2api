@@ -12,7 +12,7 @@ namespace LibraryApp.Models
         public string Email { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public bool IsActive { get; set; } = true;
-        // Roles: Admin, User, Accountant, Operator
-        public string Role { get; set; } = "User"; // Default role is User
+        // Roles: UsuarioRegistrado, Administrador, Bibiliotecario
+        public string Role { get; set; } = "UsuarioRegistrado"; 
     }
 }

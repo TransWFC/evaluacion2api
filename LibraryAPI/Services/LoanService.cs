@@ -13,6 +13,10 @@ namespace LibraryApp.Services
         private const int MAX_LOAN_DAYS = 30;
         private const int MAX_ACTIVE_LOANS_PER_USER = 5;
 
+        private const string LogError = "ERROR";
+        private const string LogWarning = "WARNING";
+        private const string LogInfo = "INFORMATION";
+
         public LoanService(
             MongoDBService mongoDBService,
             BookService bookService,
@@ -27,7 +31,7 @@ namespace LibraryApp.Services
 
         public async Task<IEnumerable<LoanResponseDTO>> GetAllLoansAsync()
         {
-            await _logService.LogAsync("INFORMATION", "Consultando todos los préstamos");
+            await _logService.LogAsync(LogInfo, "Consultando todos los préstamos");
 
             var loans = await _loans.Find(_ => true)
                 .SortByDescending(l => l.CreatedAt)
@@ -38,7 +42,7 @@ namespace LibraryApp.Services
 
         public async Task<IEnumerable<LoanResponseDTO>> GetLoansByUserAsync(string username)
         {
-            await _logService.LogAsync("INFORMATION", $"Consultando préstamos del usuario: {username}");
+            await _logService.LogAsync(LogInfo, $"Consultando préstamos del usuario: {username}");
 
             var loans = await _loans.Find(l => l.Username == username)
                 .SortByDescending(l => l.CreatedAt)
@@ -49,7 +53,7 @@ namespace LibraryApp.Services
 
         public async Task<IEnumerable<LoanResponseDTO>> GetActiveLoansByUserAsync(string username)
         {
-            await _logService.LogAsync("INFORMATION", $"Consultando préstamos activos del usuario: {username}");
+            await _logService.LogAsync(LogInfo, $"Consultando préstamos activos del usuario: {username}");
 
             var loans = await _loans.Find(l => l.Username == username && l.Status == LoanStatus.Active)
                 .SortBy(l => l.DueDate)
@@ -60,7 +64,7 @@ namespace LibraryApp.Services
 
         public async Task<IEnumerable<LoanResponseDTO>> GetOverdueLoansAsync()
         {
-            await _logService.LogAsync("INFORMATION", "Consultando préstamos vencidos");
+            await _logService.LogAsync(LogInfo, "Consultando préstamos vencidos");
 
             var currentDate = DateTime.UtcNow;
             var loans = await _loans.Find(l =>
@@ -78,18 +82,42 @@ namespace LibraryApp.Services
             return loans.Select(MapToResponseDTO);
         }
 
-        public async Task<LoanResponseDTO?> CreateLoanAsync(LoanRequestDTO loanRequest, string username, string processedBy)
+
+public async Task<LoanResponseDTO?> GetLoanByIdAsync(string loanId)
+    {
+        var loan = await _loans.Find(l => l.Id == loanId).FirstOrDefaultAsync();
+        if (loan == null) return null;
+
+        // Map to your DTO exactly as defined
+        return new LoanResponseDTO
+        {
+            Id = loan.Id,
+            BookId = loan.BookId,
+            BookTitle = loan.BookTitle,
+            BookAuthor = loan.BookAuthor,
+            Username = loan.Username,
+            LoanDate = loan.LoanDate,
+            DueDate = loan.DueDate,
+            ReturnDate = loan.ReturnDate,
+            Status = loan.Status,
+            Notes = loan.Notes,
+            ProcessedBy = loan.ProcessedBy
+            // IsOverdue is computed by the DTO property itself
+        };
+    }
+
+    public async Task<LoanResponseDTO?> CreateLoanAsync(LoanRequestDTO loanRequest, string username, string processedBy)
         {
             try
             {
-                await _logService.LogAsync("INFORMATION",
+                await _logService.LogAsync(LogInfo,
                     $"Procesando solicitud de préstamo del libro {loanRequest.BookId} para usuario {username}");
 
                 // Validaciones de negocio
                 var validationResult = await ValidateLoanRequest(loanRequest, username);
                 if (!validationResult.IsValid)
                 {
-                    await _logService.LogAsync("WARNING",
+                    await _logService.LogAsync(LogWarning,
                         $"Validación fallida para préstamo: {validationResult.ErrorMessage}");
                     return null;
                 }
@@ -100,7 +128,7 @@ namespace LibraryApp.Services
 
                 if (book == null || user == null)
                 {
-                    await _logService.LogAsync("WARNING",
+                    await _logService.LogAsync(LogWarning,
                         "Libro o usuario no encontrado para el préstamo");
                     return null;
                 }
@@ -126,36 +154,96 @@ namespace LibraryApp.Services
                 await _loans.InsertOneAsync(loan);
                 await _bookService.UpdateBookAvailabilityAsync(book.Id, -1);
 
-                await _logService.LogAsync("INFORMATION",
+                await _logService.LogAsync(LogInfo,
                     $"Préstamo creado exitosamente: {loan.Id} para usuario {username}");
 
                 return MapToResponseDTO(loan);
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR",
+                await _logService.LogAsync(LogError,
                     $"Error al crear préstamo para usuario {username}", ex);
                 throw;
             }
         }
 
+        public async Task<bool> DeleteLoanAsync(string loanId)
+        {
+            try
+            {
+                await _logService.LogAsync(LogInfo, $"Eliminando préstamo: {loanId}");
+
+                var loan = await _loans.Find(l => l.Id == loanId).FirstOrDefaultAsync();
+                if (loan == null)
+                {
+                    await _logService.LogAsync(LogWarning, $"Préstamo no encontrado: {loanId}");
+                    return false;
+                }
+
+                // Si el préstamo aún consumía inventario (Active/Overdue), regresamos 1 copia
+                if (loan.Status == LoanStatus.Active || loan.Status == LoanStatus.Overdue)
+                {
+                    var restored = await _bookService.UpdateBookAvailabilityAsync(loan.BookId, 1);
+                    if (!restored)
+                    {
+                        // No abortamos el delete, pero lo registramos (evita exceder TotalCopies)
+                        await _logService.LogAsync(LogWarning,
+                            $"No se pudo restaurar disponibilidad (posible tope) para libro {loan.BookId} al eliminar préstamo {loanId}");
+                    }
+                }
+
+                var del = await _loans.DeleteOneAsync(l => l.Id == loanId);
+                var ok = del.DeletedCount > 0;
+
+                await _logService.LogAsync(ok ? LogInfo : LogWarning,
+                    ok ? $"Préstamo eliminado: {loanId}" : $"Fallo al eliminar préstamo: {loanId}");
+
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                await _logService.LogAsync(LogError, $"Error al eliminar préstamo {loanId}", ex);
+                throw;
+            }
+        }
+
+        public async Task<bool> UpdateLoanAsync(string loanId, UpdateLoanDTO dto, string processedBy)
+        {
+            var loan = await _loans.Find(l => l.Id == loanId).FirstOrDefaultAsync();
+            if (loan == null) return false;
+
+            // No tocar inventario aquí (para eso están Return y Delete).
+            var update = Builders<Loan>.Update
+                .Set(l => l.UpdatedAt, DateTime.UtcNow);
+
+            if (dto.DueDate.HasValue)
+                update = update.Set(l => l.DueDate, dto.DueDate.Value);
+
+            if (!string.IsNullOrWhiteSpace(dto.Notes))
+                update = update.Set(l => l.Notes, $"{loan.Notes}\nEdición por {processedBy}: {dto.Notes}");
+
+            var res = await _loans.UpdateOneAsync(l => l.Id == loanId, update);
+            return res.ModifiedCount > 0;
+        }
+
+
         public async Task<bool> ReturnBookAsync(string loanId, ReturnBookDTO returnDto, string processedBy)
         {
             try
             {
-                await _logService.LogAsync("INFORMATION",
+                await _logService.LogAsync(LogInfo,
                     $"Procesando devolución del préstamo: {loanId} por {processedBy}");
 
                 var loan = await _loans.Find(l => l.Id == loanId).FirstOrDefaultAsync();
                 if (loan == null)
                 {
-                    await _logService.LogAsync("WARNING", $"Préstamo no encontrado: {loanId}");
+                    await _logService.LogAsync(LogWarning, $"Préstamo no encontrado: {loanId}");
                     return false;
                 }
 
                 if (loan.Status != LoanStatus.Active && loan.Status != LoanStatus.Overdue)
                 {
-                    await _logService.LogAsync("WARNING",
+                    await _logService.LogAsync(LogWarning,
                         $"Intento de devolver préstamo que no está activo: {loanId}");
                     return false;
                 }
@@ -177,7 +265,7 @@ namespace LibraryApp.Services
                         await _bookService.UpdateBookAvailabilityAsync(loan.BookId, 1);
                     }
 
-                    await _logService.LogAsync("INFORMATION",
+                    await _logService.LogAsync(LogInfo,
                         $"Libro devuelto exitosamente: {loanId}");
                     return true;
                 }
@@ -186,11 +274,12 @@ namespace LibraryApp.Services
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR",
+                await _logService.LogAsync(LogError,
                     $"Error al procesar devolución del préstamo {loanId}", ex);
                 throw;
             }
         }
+
 
         public async Task<bool> UpdateLoanStatusAsync(string loanId, LoanStatus newStatus)
         {
@@ -204,7 +293,7 @@ namespace LibraryApp.Services
 
                 if (result.ModifiedCount > 0)
                 {
-                    await _logService.LogAsync("INFORMATION",
+                    await _logService.LogAsync(LogInfo,
                         $"Estado del préstamo {loanId} actualizado a {newStatus}");
                 }
 
@@ -212,7 +301,7 @@ namespace LibraryApp.Services
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR",
+                await _logService.LogAsync(LogError,
                     $"Error al actualizar estado del préstamo {loanId}", ex);
                 throw;
             }

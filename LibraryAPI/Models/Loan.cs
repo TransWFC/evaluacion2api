@@ -32,7 +32,7 @@ namespace LibraryApp.Models
         public string Notes { get; set; } = string.Empty;
 
         // Información de quien procesó el préstamo
-        public string ProcessedBy { get; set; } = string.Empty; // Admin o Operator
+        public string ProcessedBy { get; set; } = string.Empty; // Admin o Bibliotecario
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -52,6 +52,8 @@ namespace LibraryApp.Models
         public string BookId { get; set; } = string.Empty;
         public int LoanDays { get; set; } = 14; // Días de préstamo, máximo 30
         public string Notes { get; set; } = string.Empty;
+        // Campo opcional para especificar el usuario del préstamo (solo para Admin y Bibliotecario)
+        public string? Username { get; set; }
     }
 
     public class ReturnBookDTO
@@ -60,6 +62,13 @@ namespace LibraryApp.Models
         public string Notes { get; set; } = string.Empty;
         public LoanStatus Status { get; set; } = LoanStatus.Returned;
     }
+
+    public class UpdateLoanDTO
+    {
+        public DateTime? DueDate { get; set; }   // opcional
+        public string? Notes { get; set; }       // opcional
+    }
+
 
     public class LoanResponseDTO
     {
@@ -73,6 +82,7 @@ namespace LibraryApp.Models
         public DateTime? ReturnDate { get; set; }
         public LoanStatus Status { get; set; }
         public string Notes { get; set; } = string.Empty;
+        public string ProcessedBy { get; set; } = string.Empty;
         public bool IsOverdue => Status == LoanStatus.Active && DateTime.UtcNow > DueDate;
     }
 }

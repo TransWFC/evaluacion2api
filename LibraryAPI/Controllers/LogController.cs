@@ -3,17 +3,24 @@ using Microsoft.AspNetCore.Mvc;
 using MongoDB.Driver;
 using LibraryApp.Models;
 using LibraryApp.Services;
+using Microsoft.AspNetCore.RateLimiting;
+
 
 namespace LibraryApp.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Administrador")]
     public class LogController : ControllerBase
     {
         private readonly MongoDBService _mongoService;
         private readonly Logservice _logService;
 
+        private const string LogError = "ERROR";
+        private const string LogWarning = "WARNING";
+        private const string LogInfo = "INFORMATION";
+        private const string ErrInternalServer = "Error interno del servidor";
+        private const string UnknownValue = "Unknown Value";
         public LogController(MongoDBService mongoService, Logservice logService)
         {
             _mongoService = mongoService;
@@ -24,12 +31,13 @@ namespace LibraryApp.Controllers
         /// Obtiene los logs más recientes - Solo Admin
         /// </summary>
         [HttpGet("recent")]
+        [EnableRateLimiting("ReadPolicy")]
         public async Task<ActionResult<IEnumerable<LogEntry>>> GetRecentLogs([FromQuery] int limit = 100)
         {
             try
             {
-                var username = User.Identity?.Name ?? "Unknown";
-                await _logService.LogAsync("INFORMATION", $"Usuario {username} consultando logs recientes");
+                var username = User.Identity?.Name ?? UnknownValue;
+                await _logService.LogAsync(LogInfo, $"Usuario {username} consultando logs recientes");
 
                 // Validar límite
                 if (limit <= 0 || limit > 1000)
@@ -45,8 +53,8 @@ namespace LibraryApp.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", "Error al obtener logs recientes", ex);
-                return StatusCode(500, new { message = "Error interno del servidor" });
+                await _logService.LogAsync(LogError, "Error al obtener logs recientes", ex);
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
 
@@ -54,6 +62,7 @@ namespace LibraryApp.Controllers
         /// Obtiene el conteo de logs por nivel - Solo Admin
         /// </summary>
         [HttpGet("count/{level}")]
+        [EnableRateLimiting("ReadPolicy")]
         public async Task<ActionResult<object>> GetLogCountByLevel(string level)
         {
             try
@@ -63,11 +72,11 @@ namespace LibraryApp.Controllers
                     return BadRequest(new { message = "El nivel de log es requerido" });
                 }
 
-                var username = User.Identity?.Name ?? "Unknown";
-                await _logService.LogAsync("INFORMATION", $"Usuario {username} consultando conteo de logs por nivel: {level}");
+                var username = User.Identity?.Name ?? UnknownValue;
+                await _logService.LogAsync(LogInfo, $"Usuario {username} consultando conteo de logs por nivel: {level}");
 
                 var count = await _mongoService.LogEntries
-                    .CountDocumentsAsync(l => l.Level.ToUpper() == level.ToUpper());
+    .CountDocumentsAsync(l => string.Equals(l.Level, level, StringComparison.OrdinalIgnoreCase));
 
                 return Ok(new
                 {
@@ -78,8 +87,8 @@ namespace LibraryApp.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", $"Error al obtener conteo de logs por nivel: {level}", ex);
-                return StatusCode(500, new { message = "Error interno del servidor" });
+                await _logService.LogAsync(LogError, $"Error al obtener conteo de logs por nivel: {level}", ex);
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
 
@@ -87,6 +96,7 @@ namespace LibraryApp.Controllers
         /// Obtiene logs por rango de fechas - Solo Admin
         /// </summary>
         [HttpGet("date-range")]
+        [EnableRateLimiting("ReadPolicy")]
         public async Task<ActionResult<IEnumerable<LogEntry>>> GetLogsByDateRange(
             [FromQuery] DateTime startDate,
             [FromQuery] DateTime endDate,
@@ -94,8 +104,8 @@ namespace LibraryApp.Controllers
         {
             try
             {
-                var username = User.Identity?.Name ?? "Unknown";
-                await _logService.LogAsync("INFORMATION",
+                var username = User.Identity?.Name ?? UnknownValue;
+                await _logService.LogAsync(LogInfo,
                     $"Usuario {username} consultando logs por rango de fechas: {startDate} - {endDate}");
 
                 // Validar fechas
@@ -123,9 +133,9 @@ namespace LibraryApp.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR",
+                await _logService.LogAsync(LogError,
                     $"Error al obtener logs por rango de fechas: {startDate} - {endDate}", ex);
-                return StatusCode(500, new { message = "Error interno del servidor" });
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
 
@@ -133,6 +143,7 @@ namespace LibraryApp.Controllers
         /// Obtiene logs por usuario específico - Solo Admin
         /// </summary>
         [HttpGet("user/{username}")]
+        [EnableRateLimiting("ReadPolicy")]
         public async Task<ActionResult<IEnumerable<LogEntry>>> GetLogsByUser(
             string username,
             [FromQuery] int limit = 200)
@@ -144,8 +155,8 @@ namespace LibraryApp.Controllers
                     return BadRequest(new { message = "El nombre de usuario es requerido" });
                 }
 
-                var currentUser = User.Identity?.Name ?? "Unknown";
-                await _logService.LogAsync("INFORMATION",
+                var currentUser = User.Identity?.Name ?? UnknownValue;
+                await _logService.LogAsync(LogInfo,
                     $"Usuario {currentUser} consultando logs del usuario: {username}");
 
                 // Validar límite
@@ -162,8 +173,8 @@ namespace LibraryApp.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", $"Error al obtener logs del usuario: {username}", ex);
-                return StatusCode(500, new { message = "Error interno del servidor" });
+                await _logService.LogAsync(LogError, $"Error al obtener logs del usuario: {username}", ex);
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
 
@@ -171,17 +182,18 @@ namespace LibraryApp.Controllers
         /// Obtiene estadísticas generales de logs - Solo Admin
         /// </summary>
         [HttpGet("statistics")]
+        [EnableRateLimiting("ReadPolicy")]
         public async Task<ActionResult<object>> GetLogStatistics()
         {
             try
             {
-                var username = User.Identity?.Name ?? "Unknown";
-                await _logService.LogAsync("INFORMATION", $"Usuario {username} consultando estadísticas de logs");
+                var username = User.Identity?.Name ?? UnknownValue;
+                await _logService.LogAsync(LogInfo, $"Usuario {username} consultando estadísticas de logs");
 
                 var totalLogs = await _mongoService.LogEntries.CountDocumentsAsync(_ => true);
-                var errorLogs = await _mongoService.LogEntries.CountDocumentsAsync(l => l.Level == "ERROR");
-                var warningLogs = await _mongoService.LogEntries.CountDocumentsAsync(l => l.Level == "WARNING");
-                var infoLogs = await _mongoService.LogEntries.CountDocumentsAsync(l => l.Level == "INFORMATION");
+                var errorLogs = await _mongoService.LogEntries.CountDocumentsAsync(l => l.Level == LogError);
+                var warningLogs = await _mongoService.LogEntries.CountDocumentsAsync(l => l.Level == LogWarning);
+                var infoLogs = await _mongoService.LogEntries.CountDocumentsAsync(l => l.Level == LogInfo);
 
                 // Logs de las últimas 24 horas
                 var yesterday = DateTime.UtcNow.AddDays(-1);
@@ -202,8 +214,8 @@ namespace LibraryApp.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", "Error al obtener estadísticas de logs", ex);
-                return StatusCode(500, new { message = "Error interno del servidor" });
+                await _logService.LogAsync(LogError, "Error al obtener estadísticas de logs", ex);
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
 
@@ -211,6 +223,7 @@ namespace LibraryApp.Controllers
         /// Busca logs por término en el mensaje - Solo Admin
         /// </summary>
         [HttpGet("search")]
+        [EnableRateLimiting("ReadPolicy")]
         public async Task<ActionResult<IEnumerable<LogEntry>>> SearchLogs(
             [FromQuery] string searchTerm,
             [FromQuery] int limit = 300)
@@ -222,8 +235,8 @@ namespace LibraryApp.Controllers
                     return BadRequest(new { message = "Término de búsqueda es requerido" });
                 }
 
-                var username = User.Identity?.Name ?? "Unknown";
-                await _logService.LogAsync("INFORMATION",
+                var username = User.Identity?.Name ?? UnknownValue;
+                await _logService.LogAsync(LogInfo,
                     $"Usuario {username} buscando logs con término: {searchTerm}");
 
                 // Validar límite
@@ -244,8 +257,8 @@ namespace LibraryApp.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", $"Error al buscar logs con término: {searchTerm}", ex);
-                return StatusCode(500, new { message = "Error interno del servidor" });
+                await _logService.LogAsync(LogError, $"Error al buscar logs con término: {searchTerm}", ex);
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
     }

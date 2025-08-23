@@ -1,5 +1,6 @@
 ﻿using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
 namespace LibraryApp.Models
@@ -46,7 +47,8 @@ namespace LibraryApp.Models
         public string Author { get; set; } = string.Empty;
         public string ISBN { get; set; } = string.Empty;
         public string Publisher { get; set; } = string.Empty;
-        public int PublicationYear { get; set; }
+        [Required]
+        public int PublicationYear { get; set; }   // Ahora puede ser null
         public string Category { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public int TotalCopies { get; set; } = 1;
@@ -57,9 +59,11 @@ namespace LibraryApp.Models
         public string Title { get; set; } = string.Empty;
         public string Author { get; set; } = string.Empty;
         public string Publisher { get; set; } = string.Empty;
-        public int PublicationYear { get; set; }
+       
+        [Required]
+        public int PublicationYear { get; set; }   // Ahora puede ser null
         public string Category { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
-        public int TotalCopies { get; set; }
+        public int? TotalCopies { get; set; }       // Ahora puede ser null
     }
 }

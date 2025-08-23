@@ -9,6 +9,10 @@ namespace LibraryApp.Services
         private readonly IMongoCollection<Book> _books;
         private readonly Logservice _logService;
 
+        private const string LogError = "ERROR";
+        private const string LogWarning = "WARNING";
+        private const string LogInfo = "INFORMATION";
+
         public BookService(MongoDBService mongoDBService, Logservice logService)
         {
             _books = mongoDBService._database.GetCollection<Book>("Books");
@@ -17,7 +21,7 @@ namespace LibraryApp.Services
 
         public async Task<IEnumerable<Book>> GetAllBooksAsync()
         {
-            await _logService.LogAsync("INFORMATION", "Consultando todos los libros disponibles");
+            await _logService.LogAsync(LogInfo, "Consultando todos los libros disponibles");
             return await _books.Find(b => b.IsActive).ToListAsync();
         }
 
@@ -25,11 +29,11 @@ namespace LibraryApp.Services
         {
             if (string.IsNullOrEmpty(id))
             {
-                await _logService.LogAsync("WARNING", "Intento de consulta de libro con ID nulo o vacío");
+                await _logService.LogAsync(LogInfo, "Intento de consulta de libro con ID nulo o vacío");
                 return null;
             }
 
-            await _logService.LogAsync("INFORMATION", $"Consultando libro con ID: {id}");
+            await _logService.LogAsync(LogInfo, $"Consultando libro con ID: {id}");
             return await _books.Find(b => b.Id == id && b.IsActive).FirstOrDefaultAsync();
         }
 
@@ -40,7 +44,7 @@ namespace LibraryApp.Services
                 return await GetAllBooksAsync();
             }
 
-            await _logService.LogAsync("INFORMATION", $"Búsqueda de libros con término: {searchTerm}");
+            await _logService.LogAsync(LogInfo, $"Búsqueda de libros con término: {searchTerm}");
 
             var filter = Builders<Book>.Filter.And(
                 Builders<Book>.Filter.Eq(b => b.IsActive, true),
@@ -59,7 +63,7 @@ namespace LibraryApp.Services
         {
             try
             {
-                await _logService.LogAsync("INFORMATION", $"Creando nuevo libro: {bookDto.Title} por usuario: {createdBy}");
+                await _logService.LogAsync(LogInfo, $"Creando nuevo libro: {bookDto.Title} por usuario: {createdBy}");
 
                 // Validar ISBN duplicado
                 if (!string.IsNullOrEmpty(bookDto.ISBN))
@@ -68,7 +72,7 @@ namespace LibraryApp.Services
                         .FirstOrDefaultAsync();
                     if (existingBook != null)
                     {
-                        await _logService.LogAsync("WARNING", $"Intento de crear libro con ISBN duplicado: {bookDto.ISBN}");
+                        await _logService.LogAsync(LogWarning, $"Intento de crear libro con ISBN duplicado: {bookDto.ISBN}");
                         return null;
                     }
                 }
@@ -91,13 +95,13 @@ namespace LibraryApp.Services
                 };
 
                 await _books.InsertOneAsync(book);
-                await _logService.LogAsync("INFORMATION", $"Libro creado exitosamente: {book.Title} con ID: {book.Id}");
+                await _logService.LogAsync(LogInfo, $"Libro creado exitosamente: {book.Title} con ID: {book.Id}");
 
                 return book;
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", $"Error al crear libro: {bookDto.Title}", ex);
+                await _logService.LogAsync( LogError, $"Error al crear libro: {bookDto.Title}", ex);
                 throw;
             }
         }
@@ -106,7 +110,7 @@ namespace LibraryApp.Services
         {
             try
             {
-                await _logService.LogAsync("INFORMATION", $"Actualizando libro con ID: {id} por usuario: {updatedBy}");
+                await _logService.LogAsync(LogInfo, $"Actualizando libro con ID: {id} por usuario: {updatedBy}");
 
                 var update = Builders<Book>.Update
                     .Set(b => b.Title, updateBookDto.Title)
@@ -141,16 +145,16 @@ namespace LibraryApp.Services
 
                 if (result.ModifiedCount > 0)
                 {
-                    await _logService.LogAsync("INFORMATION", $"Libro actualizado exitosamente: ID {id}");
+                    await _logService.LogAsync(LogInfo, $"Libro actualizado exitosamente: ID {id}");
                     return true;
                 }
 
-                await _logService.LogAsync("WARNING", $"No se pudo actualizar el libro con ID: {id}");
+                await _logService.LogAsync(LogWarning, $"No se pudo actualizar el libro con ID: {id}");
                 return false;
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", $"Error al actualizar libro con ID: {id}", ex);
+                await _logService.LogAsync(LogError, $"Error al actualizar libro con ID: {id}", ex);
                 throw;
             }
         }
@@ -159,7 +163,7 @@ namespace LibraryApp.Services
         {
             try
             {
-                await _logService.LogAsync("INFORMATION", $"Eliminando libro con ID: {id} por usuario: {deletedBy}");
+                await _logService.LogAsync(LogInfo, $"Eliminando libro con ID: {id} por usuario: {deletedBy}");
 
                 // Soft delete - marcar como inactivo
                 var update = Builders<Book>.Update
@@ -172,16 +176,16 @@ namespace LibraryApp.Services
 
                 if (result.ModifiedCount > 0)
                 {
-                    await _logService.LogAsync("INFORMATION", $"Libro eliminado exitosamente: ID {id}");
+                    await _logService.LogAsync(LogInfo, $"Libro eliminado exitosamente: ID {id}");
                     return true;
                 }
 
-                await _logService.LogAsync("WARNING", $"No se pudo eliminar el libro con ID: {id}");
+                await _logService.LogAsync(LogWarning, $"No se pudo eliminar el libro con ID: {id}");
                 return false;
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", $"Error al eliminar libro con ID: {id}", ex);
+                await _logService.LogAsync(LogError, $"Error al eliminar libro con ID: {id}", ex);
                 throw;
             }
         }
@@ -198,14 +202,14 @@ namespace LibraryApp.Services
                     b => b.Id == bookId && b.IsActive,
                     update);
 
-                await _logService.LogAsync("INFORMATION",
+                await _logService.LogAsync(LogInfo,
                     $"Actualizada disponibilidad del libro {bookId}: cambio de {change} copias");
 
                 return result.ModifiedCount > 0;
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", $"Error al actualizar disponibilidad del libro {bookId}", ex);
+                await _logService.LogAsync(LogError, $"Error al actualizar disponibilidad del libro {bookId}", ex);
                 throw;
             }
         }

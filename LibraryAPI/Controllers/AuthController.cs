@@ -1,20 +1,28 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using LibraryApp.Models;
+using LibraryApp.Services;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using LibraryApp.Models;
-using LibraryApp.Services;
 
 namespace LibraryApp.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [EnableRateLimiting("AuthPolicy")]
     public class AuthController : ControllerBase
     {
         private readonly IConfiguration _configuration;
         private readonly UserService _userService;
         private readonly Logservice _logService;
+
+        private const string LogError = "ERROR";
+        private const string LogWarning = "WARNING";
+        private const string LogInfo = "INFORMATION";
+        private const string ErrInternalServer = "Error interno del servidor";
+        private const string UnknownValue = "Unknown";
 
         public AuthController(
             IConfiguration configuration,
@@ -26,55 +34,64 @@ namespace LibraryApp.Controllers
             _logService = logService;
         }
 
-        /// <summary>
-        /// Registra un nuevo usuario
-        /// </summary>
+        // Registra un nuevo usuario
+        // Roles : Administrador, Bibliotecario, UsuarioRegistrado
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request)
         {
             try
             {
-                await _logService.LogAsync("INFORMATION", $"Intento de registro para usuario: {request.Username}");
+                await _logService.LogAsync(LogInfo, $"Intento de registro para usuario: {request.Username}");
 
                 // Validaciones de entrada
                 if (string.IsNullOrWhiteSpace(request.Username)
                         || string.IsNullOrWhiteSpace(request.Password)
                         || string.IsNullOrWhiteSpace(request.Email))
                 {
-                    await _logService.LogAsync("WARNING", "Intento de registro con datos incompletos");
+                    await _logService.LogAsync(LogWarning, "Intento de registro con datos incompletos");
                     return BadRequest(new { message = "Username, Password and Email are required" });
                 }
 
                 // Validar formato de email
                 if (!EmailValidator.IsValid(request.Email))
                 {
-                    await _logService.LogAsync("WARNING", $"Intento de registro con formato de email inválido: {request.Email}");
+                    await _logService.LogAsync(LogWarning, $"Intento de registro con formato de email inválido: {request.Email}");
                     return BadRequest(new { message = "Invalid email format" });
                 }
 
                 // Validar fortaleza de contraseña
                 if (!PasswordValidator.IsValid(request.Password))
                 {
-                    await _logService.LogAsync("WARNING", "Intento de registro con contraseña que no cumple los requisitos");
+                    await _logService.LogAsync(LogWarning, "Intento de registro con contraseña que no cumple los requisitos");
                     return BadRequest(new
                     {
                         message = "Password must be at least 5 characters long, contain at least one uppercase letter, one lowercase letter, and one number"
                     });
                 }
 
-                // Validar rol (solo ciertos roles permitidos)
-                var allowedRoles = new[] { "User", "Admin", "Operator", "Accountant" };
-                if (!string.IsNullOrEmpty(request.Role) && !allowedRoles.Contains(request.Role))
+                // Validar rol - ACTUALIZADO con los roles correctos
+                var allowedRoles = new[] { "UsuarioRegistrado", "Administrador", "Bibliotecario" };
+
+                // Si no se especifica rol, asignar UsuarioRegistrado por defecto
+                if (string.IsNullOrEmpty(request.Role))
                 {
-                    await _logService.LogAsync("WARNING", $"Intento de registro con rol inválido: {request.Role}");
-                    return BadRequest(new { message = "Invalid role specified" });
+                    request.Role = "UsuarioRegistrado";
+                }
+
+                if (!allowedRoles.Contains(request.Role))
+                {
+                    await _logService.LogAsync(LogWarning, $"Intento de registro con rol inválido: {request.Role}");
+                    return BadRequest(new
+                    {
+                        message = "Invalid role specified. Allowed roles: UsuarioRegistrado, Administrador, Bibliotecario"
+                    });
                 }
 
                 var user = new User
                 {
                     Username = request.Username.Trim(),
                     Email = request.Email.Trim().ToLowerInvariant(),
-                    Role = string.IsNullOrEmpty(request.Role) ? "User" : request.Role,
+                    Role = request.Role,
                     CreatedAt = DateTime.UtcNow,
                     IsActive = true
                 };
@@ -82,11 +99,11 @@ namespace LibraryApp.Controllers
                 var createdUser = await _userService.CreateUserAsync(user, request.Password);
                 if (createdUser == null)
                 {
-                    await _logService.LogAsync("WARNING", $"Intento de registro para usuario existente: {request.Username}");
+                    await _logService.LogAsync(LogWarning, $"Intento de registro para usuario existente: {request.Username}");
                     return Conflict(new { message = "User already exists" });
                 }
 
-                await _logService.LogAsync("INFORMATION", $"Usuario registrado exitosamente: {request.Username}");
+                await _logService.LogAsync(LogInfo, $"Usuario registrado exitosamente: {request.Username} con rol {request.Role}");
                 return Ok(new
                 {
                     message = "User created successfully",
@@ -101,8 +118,8 @@ namespace LibraryApp.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", $"Error durante el registro de usuario: {request.Username}", ex);
-                return StatusCode(500, new { message = "Internal server error" });
+                await _logService.LogAsync(LogError, $"Error durante el registro de usuario: {request.Username}", ex);
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
 
@@ -114,12 +131,12 @@ namespace LibraryApp.Controllers
         {
             try
             {
-                await _logService.LogAsync("INFORMATION", $"Intento de login para usuario: {request.Username}");
+                await _logService.LogAsync(LogInfo, $"Intento de login para usuario: {request.Username}");
 
                 // Validaciones de entrada
                 if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
                 {
-                    await _logService.LogAsync("WARNING", "Intento de login con credenciales incompletas");
+                    await _logService.LogAsync(LogWarning, "Intento de login con credenciales incompletas");
                     return BadRequest(new { message = "Username and password are required" });
                 }
 
@@ -131,7 +148,7 @@ namespace LibraryApp.Controllers
 
                 if (string.IsNullOrEmpty(jwtKey))
                 {
-                    await _logService.LogAsync("ERROR", "JWT Key no configurada");
+                    await _logService.LogAsync(LogError, "JWT Key no configurada");
                     return StatusCode(500, new { message = "Server configuration error" });
                 }
 
@@ -140,7 +157,7 @@ namespace LibraryApp.Controllers
 
                 if (user == null || !user.IsActive || !PasswordHasher.VerifyPassword(request.Password, user.PasswordHash))
                 {
-                    await _logService.LogAsync("WARNING", $"Intento de login fallido para usuario: {request.Username}");
+                    await _logService.LogAsync(LogWarning, $"Intento de login fallido para usuario: {request.Username}");
                     return Unauthorized(new { message = "Invalid username or password" });
                 }
 
@@ -166,7 +183,7 @@ namespace LibraryApp.Controllers
 
                 var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
 
-                await _logService.LogAsync("INFORMATION", $"Login exitoso para usuario: {request.Username}");
+                await _logService.LogAsync(LogInfo, $"Login exitoso para usuario: {request.Username} con rol {user.Role}");
 
                 return Ok(new
                 {
@@ -183,8 +200,8 @@ namespace LibraryApp.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", $"Error durante el login de usuario: {request.Username}", ex);
-                return StatusCode(500, new { message = "Internal server error" });
+                await _logService.LogAsync(LogError, $"Error durante el login de usuario: {request.Username}", ex);
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
 
@@ -197,8 +214,9 @@ namespace LibraryApp.Controllers
         {
             try
             {
-                var username = User.Identity?.Name ?? "Unknown";
-                await _logService.LogAsync("INFORMATION", $"Verificación de token para usuario: {username}");
+                var username = User.Identity?.Name ?? UnknownValue;
+                var role = User.FindFirst(ClaimTypes.Role)?.Value ?? UnknownValue;
+                await _logService.LogAsync(LogInfo, $"Verificación de token para usuario: {username} (Rol: {role})");
 
                 var userInfo = new
                 {
@@ -212,8 +230,8 @@ namespace LibraryApp.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", "Error durante la verificación de token", ex);
-                return StatusCode(500, new { message = "Internal server error" });
+                await _logService.LogAsync(LogError, "Error durante la verificación de token", ex);
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
 
@@ -226,15 +244,16 @@ namespace LibraryApp.Controllers
         {
             try
             {
-                var username = User.Identity?.Name ?? "Unknown";
-                await _logService.LogAsync("INFORMATION", $"Logout para usuario: {username}");
+                var username = User.Identity?.Name ?? UnknownValue;
+                var role = User.FindFirst(ClaimTypes.Role)?.Value ?? UnknownValue;
+                await _logService.LogAsync(LogInfo, $"Logout para usuario: {username} (Rol: {role})");
 
                 return Ok(new { message = "Logged out successfully" });
             }
             catch (Exception ex)
             {
-                await _logService.LogAsync("ERROR", "Error durante el logout", ex);
-                return StatusCode(500, new { message = "Internal server error" });
+                await _logService.LogAsync(LogError, "Error durante el logout", ex);
+                return StatusCode(500, new { message = ErrInternalServer });
             }
         }
     }
@@ -248,6 +267,6 @@ namespace LibraryApp.Controllers
     public class RegisterRequest : LoginRequest
     {
         public string Email { get; set; } = string.Empty;
-        public string Role { get; set; } = "User"; // Default role is User
+        public string Role { get; set; } = "UsuarioRegistrado"; // Default role es UsuarioRegistrado
     }
 }

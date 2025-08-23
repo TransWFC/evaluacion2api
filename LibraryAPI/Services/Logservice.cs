@@ -1,5 +1,7 @@
 ﻿using MongoDB.Driver;
 using LibraryApp.Models;
+using Microsoft.Extensions.Logging;
+using System.Threading;
 
 namespace LibraryApp.Services
 {
@@ -8,6 +10,10 @@ namespace LibraryApp.Services
         private readonly IMongoCollection<LogEntry> _logs;
         private readonly ILogger<Logservice> _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
+
+        private static readonly EventId GeneralLogEvent = new(1000, "General");
+        private const string LogTemplate =
+            "[{Level}] {Message} | user={User} controller={Controller} action={Action} traceId={TraceId}";
 
         public Logservice(
             MongoDBService mongoDBService,
@@ -19,11 +25,13 @@ namespace LibraryApp.Services
             _httpContextAccessor = httpContextAccessor;
         }
 
-        public async Task LogAsync(string level, string message, Exception? exception = null)
+        public async Task LogAsync(string level, string message, Exception? exception = null, CancellationToken ct = default)
         {
-            var username = _httpContextAccessor.HttpContext?.User?.Identity?.Name;
-            var controller = _httpContextAccessor.HttpContext?.Request.RouteValues["controller"]?.ToString();
-            var action = _httpContextAccessor.HttpContext?.Request.RouteValues["action"]?.ToString();
+            var http = _httpContextAccessor.HttpContext;
+            var username = http?.User?.Identity?.Name;
+            var controller = http?.Request?.RouteValues["controller"]?.ToString();
+            var action = http?.Request?.RouteValues["action"]?.ToString();
+            var traceId = http?.TraceIdentifier;
 
             var logEntry = new LogEntry
             {
@@ -36,29 +44,31 @@ namespace LibraryApp.Services
                 Action = action
             };
 
-            await _logs.InsertOneAsync(logEntry);
+            await _logs.InsertOneAsync(logEntry, cancellationToken: ct);
 
-            // También logear usando el sistema de logging integrado
-            LogToProvider(level, message, exception);
+            // Logging integrado con plantilla constante
+            var logLevel = MapLevel(level);
+            _logger.Log(
+                logLevel,
+                GeneralLogEvent,
+                exception,
+                LogTemplate,
+                level,
+                message,
+                username,
+                controller,
+                action,
+                traceId
+            );
         }
 
-        private void LogToProvider(string level, string message, Exception? exception)
-        {
-            switch (level.ToUpper())
-            {
-                case "ERROR":
-                    _logger.LogError(exception, message);
-                    break;
-                case "WARNING":
-                    _logger.LogWarning(message);
-                    break;
-                case "INFORMATION":
-                    _logger.LogInformation(message);
-                    break;
-                default:
-                    _logger.LogDebug(message);
-                    break;
-            }
-        }
+        private static LogLevel MapLevel(string? level) =>
+            level is null ? LogLevel.Debug :
+            level.Equals("ERROR", StringComparison.OrdinalIgnoreCase) ? LogLevel.Error :
+            level.Equals("WARNING", StringComparison.OrdinalIgnoreCase) ? LogLevel.Warning :
+            level.Equals("INFORMATION", StringComparison.OrdinalIgnoreCase) ? LogLevel.Information :
+            level.Equals("CRITICAL", StringComparison.OrdinalIgnoreCase) ? LogLevel.Critical :
+            level.Equals("TRACE", StringComparison.OrdinalIgnoreCase) ? LogLevel.Trace :
+            LogLevel.Debug;
     }
 }

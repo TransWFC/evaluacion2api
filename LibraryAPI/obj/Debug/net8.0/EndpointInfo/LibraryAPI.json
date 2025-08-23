@@ -2,11 +2,7 @@
   "openapi": "3.0.1",
   "info": {
     "title": "Library Management API",
-    "description": "API segura para gestión de biblioteca digital con autenticación JWT y autorización basada en roles",
-    "contact": {
-      "name": "Soporte Técnico",
-      "email": "soporte@biblioteca.com"
-    },
+    "description": "API segura para gestión de biblioteca digital",
     "version": "v1"
   },
   "paths": {
@@ -347,25 +343,6 @@
         }
       }
     },
-    "/info": {
-      "get": {
-        "tags": [
-          "LibraryAPI"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StringStringStringDateTimeStringArray<>f__AnonymousType12"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/health": {
       "get": {
         "tags": [
@@ -377,7 +354,107 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StringDateTime<>f__AnonymousType13"
+                  "$ref": "#/components/schemas/StringDateTimeString<>f__AnonymousType12"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Loans/{id}": {
+      "delete": {
+        "tags": [
+          "Loans"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Loans"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLoanDTO"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLoanDTO"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateLoanDTO"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Loans"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 24,
+              "minLength": 24,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoanResponseDTO"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoanResponseDTO"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoanResponseDTO"
                 }
               }
             }
@@ -691,17 +768,17 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateLoanStatusDTO"
+                "$ref": "#/components/schemas/UpdateLoanStatusDto"
               }
             },
             "text/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateLoanStatusDTO"
+                "$ref": "#/components/schemas/UpdateLoanStatusDto"
               }
             },
             "application/*+json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateLoanStatusDTO"
+                "$ref": "#/components/schemas/UpdateLoanStatusDto"
               }
             }
           }
@@ -721,6 +798,54 @@
         "responses": {
           "200": {
             "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/Loans/user/{targetUsername}": {
+      "get": {
+        "tags": [
+          "Loans"
+        ],
+        "parameters": [
+          {
+            "name": "targetUsername",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LoanResponseDTO"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LoanResponseDTO"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LoanResponseDTO"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -985,6 +1110,44 @@
           }
         }
       }
+    },
+    "/api/Users": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserLookupDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserLookupDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserLookupDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1051,6 +1214,9 @@
         "additionalProperties": false
       },
       "BookDTO": {
+        "required": [
+          "publicationYear"
+        ],
         "type": "object",
         "properties": {
           "title": {
@@ -1102,6 +1268,10 @@
           "notes": {
             "type": "string",
             "nullable": true
+          },
+          "username": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -1146,6 +1316,10 @@
             "$ref": "#/components/schemas/LoanStatus"
           },
           "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "processedBy": {
             "type": "string",
             "nullable": true
           },
@@ -1256,7 +1430,7 @@
         },
         "additionalProperties": false
       },
-      "StringDateTime<>f__AnonymousType13": {
+      "StringDateTimeString<>f__AnonymousType12": {
         "type": "object",
         "properties": {
           "status": {
@@ -1266,40 +1440,18 @@
           "timestamp": {
             "type": "string",
             "format": "date-time"
-          }
-        },
-        "additionalProperties": false
-      },
-      "StringStringStringDateTimeStringArray<>f__AnonymousType12": {
-        "type": "object",
-        "properties": {
-          "application": {
-            "type": "string",
-            "nullable": true
-          },
-          "version": {
-            "type": "string",
-            "nullable": true
           },
           "environment": {
             "type": "string",
-            "nullable": true
-          },
-          "timestamp": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "features": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
             "nullable": true
           }
         },
         "additionalProperties": false
       },
       "UpdateBookDTO": {
+        "required": [
+          "publicationYear"
+        ],
         "type": "object",
         "properties": {
           "title": {
@@ -1328,16 +1480,46 @@
           },
           "totalCopies": {
             "type": "integer",
-            "format": "int32"
+            "format": "int32",
+            "nullable": true
           }
         },
         "additionalProperties": false
       },
-      "UpdateLoanStatusDTO": {
+      "UpdateLoanDTO": {
+        "type": "object",
+        "properties": {
+          "dueDate": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateLoanStatusDto": {
         "type": "object",
         "properties": {
           "status": {
             "$ref": "#/components/schemas/LoanStatus"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UserLookupDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "nullable": true
+          },
+          "username": {
+            "type": "string",
+            "nullable": true
           }
         },
         "additionalProperties": false
@@ -1346,7 +1528,7 @@
     "securitySchemes": {
       "Bearer": {
         "type": "http",
-        "description": "Ingrese 'Bearer' seguido de un espacio y el JWT token. Ejemplo: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'",
+        "description": "Ingrese 'Bearer' seguido de un espacio y el JWT token",
         "scheme": "Bearer",
         "bearerFormat": "JWT"
       }

@@ -1,11 +1,13 @@
 using LibraryApp.Models;
 using LibraryApp.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Security.Claims;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,9 +15,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-        // Para manejar enums como strings en JSON
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-        // Configuración para nombres de propiedades en camelCase
         options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 
@@ -54,46 +54,95 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = jwtIssuer,
             ValidAudience = jwtAudience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-            ClockSkew = TimeSpan.Zero // Elimina el tiempo de gracia por defecto
-        };
-
-        // Configuración adicional para desarrollo/debugging
-        options.Events = new JwtBearerEvents
-        {
-            OnAuthenticationFailed = context =>
-            {
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                logger.LogError("Autenticación fallida: {Error}", context.Exception.Message);
-                return Task.CompletedTask;
-            },
-            OnTokenValidated = context =>
-            {
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
-                var username = context.Principal?.Identity?.Name ?? "Unknown";
-                logger.LogInformation("Token validado para usuario: {Username}", username);
-                return Task.CompletedTask;
-            }
+            ClockSkew = TimeSpan.Zero
         };
     });
 
-// Authorization
+// Authorization con roles correctos
 builder.Services.AddAuthorization(options =>
 {
     // Política para administradores
     options.AddPolicy("AdminOnly", policy =>
-        policy.RequireRole("Admin"));
+        policy.RequireRole("Administrador"));
 
-    // Política para administradores y operadores
-    options.AddPolicy("AdminOrOperator", policy =>
-        policy.RequireRole("Admin", "Operator"));
+    // Política para administradores y bibliotecarios
+    options.AddPolicy("AdminOrLibrarian", policy =>
+        policy.RequireRole("Administrador", "Bibliotecario"));
 
-    // Política para administradores y contadores
-    options.AddPolicy("AdminOrAccountant", policy =>
-        policy.RequireRole("Admin", "Accountant"));
+    // Política para usuarios registrados
+    options.AddPolicy("RegisteredUser", policy =>
+        policy.RequireRole("UsuarioRegistrado", "Bibliotecario", "Administrador"));
 
     // Política para todos los usuarios autenticados
     options.AddPolicy("AuthenticatedUsers", policy =>
         policy.RequireAuthenticatedUser());
+});
+
+// Rate Limiting Configuración Completa
+builder.Services.AddRateLimiter(options =>
+{
+    // Política global por IP
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: partition => new FixedWindowRateLimiterOptions
+            {
+                AutoReplenishment = true,
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+
+    // Política específica para autenticación
+    options.AddPolicy("AuthPolicy", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: partition => new FixedWindowRateLimiterOptions
+            {
+                AutoReplenishment = true,
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+
+    // Política para APIs de lectura
+    options.AddPolicy("ReadPolicy", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: partition => new FixedWindowRateLimiterOptions
+            {
+                AutoReplenishment = true,
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+
+    // Política para APIs de escritura (más restrictiva)
+    options.AddPolicy("WritePolicy", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: partition => new FixedWindowRateLimiterOptions
+            {
+                AutoReplenishment = true,
+                PermitLimit = 50,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+
+    // Respuesta cuando se excede el límite
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.StatusCode = 429;
+        context.HttpContext.Response.ContentType = "application/json";
+
+        var response = new
+        {
+            error = "Rate limit exceeded",
+            message = "Too many requests. Please try again later.",
+            retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter) ? retryAfter.TotalSeconds : 60,
+            timestamp = DateTime.UtcNow
+        };
+
+        await context.HttpContext.Response
+    .WriteAsync(System.Text.Json.JsonSerializer.Serialize(response), token);
+
+    };
 });
 
 // Swagger/OpenAPI
@@ -104,15 +153,9 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title = "Library Management API",
         Version = "v1",
-        Description = "API segura para gestión de biblioteca digital con autenticación JWT y autorización basada en roles",
-        Contact = new OpenApiContact
-        {
-            Name = "Soporte Técnico",
-            Email = "soporte@biblioteca.com"
-        }
+        Description = "API segura para gestión de biblioteca digital"
     });
 
-    // Configuración de JWT en Swagger
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
@@ -120,7 +163,7 @@ builder.Services.AddSwaggerGen(c =>
         Scheme = "Bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "Ingrese 'Bearer' seguido de un espacio y el JWT token. Ejemplo: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'"
+        Description = "Ingrese 'Bearer' seguido de un espacio y el JWT token"
     });
 
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -139,38 +182,49 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// CORS - Política segura
+// CORS - Política segura de producción
+var allowedOrigins = builder.Configuration.GetSection("Security:AllowedOrigins").Get<string[]>() ??
+    new[] { "http://localhost:4200", "https://localhost:4200" };
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("SecurePolicy", policy =>
     {
         policy
-            .WithOrigins("http://localhost:4200", "https://localhost:4200") // Solo Angular dev
+            .WithOrigins(allowedOrigins)
             .WithMethods("GET", "POST", "PUT", "DELETE")
-            .WithHeaders("Content-Type", "Authorization")
-            .AllowCredentials();
+            .WithHeaders("Content-Type", "Authorization", "x-api-type", "x-api-name")
+            .AllowCredentials()
+            .SetPreflightMaxAge(TimeSpan.FromMinutes(5));
     });
 });
-
-// Rate Limiting básico
-builder.Services.AddMemoryCache();
 
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 
-// Security Headers básicos
+
+// Security Headers
+// Security Headers
 app.Use(async (context, next) =>
 {
-    context.Response.Headers.Add("X-Content-Type-Options", "nosniff");
-    context.Response.Headers.Add("X-Frame-Options", "DENY");
-    context.Response.Headers.Add("X-XSS-Protection", "1; mode=block");
-    context.Response.Headers.Add("Referrer-Policy", "strict-origin-when-cross-origin");
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    context.Response.Headers.XFrameOptions = "DENY";
+    context.Response.Headers.XXSSProtection = "1; mode=block";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin"; 
+    context.Response.Headers.ContentSecurityPolicy = "default-src 'self'";
+
+    if (app.Environment.IsProduction())
+    {
+        context.Response.Headers.StrictTransportSecurity = "max-age=31536000; includeSubDomains";
+    }
 
     await next();
 });
 
-// Exception Handling simple
+
+
+// Exception Handling
 app.UseExceptionHandler(appBuilder =>
 {
     appBuilder.Run(async context =>
@@ -178,11 +232,9 @@ app.UseExceptionHandler(appBuilder =>
         context.Response.StatusCode = 500;
         context.Response.ContentType = "application/json";
 
-        var errorId = Guid.NewGuid().ToString();
         var response = new
         {
             error = "Error interno del servidor",
-            errorId = errorId,
             timestamp = DateTime.UtcNow
         };
 
@@ -196,7 +248,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "Library API V1");
-        c.RoutePrefix = string.Empty; // Swagger en la raíz
+        c.RoutePrefix = string.Empty;
     });
 }
 
@@ -206,82 +258,44 @@ app.UseHttpsRedirection();
 // CORS
 app.UseCors("SecurePolicy");
 
-// Rate Limiting middleware
-app.Use(async (context, next) =>
+// Rate Limiting
+app.UseRateLimiter();
+
+// Request Logging simplificado para producción
+if (app.Environment.IsDevelopment())
 {
-    var cache = context.RequestServices.GetRequiredService<IMemoryCache>();
-    var clientIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-    var key = $"rate_limit_{clientIp}";
-
-    if (!cache.TryGetValue(key, out int requestCount))
+    app.Use(async (context, next) =>
     {
-        requestCount = 0;
-    }
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-    requestCount++;
-    cache.Set(key, requestCount, TimeSpan.FromMinutes(1));
+        await next();
 
-    // Límite: 100 requests por minuto por IP
-    if (requestCount > 100)
-    {
-        context.Response.StatusCode = 429;
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new { error = "Rate limit exceeded. Try again later." }));
-        return;
-    }
+        stopwatch.Stop();
+        logger.LogInformation(
+            "HTTP {Method} {Path} - {StatusCode} - {ElapsedMs}ms",
+            context.Request.Method,
+            context.Request.Path,
+            context.Response.StatusCode,
+            stopwatch.ElapsedMilliseconds);
+    });
+}
 
-    await next();
-});
-
-// Logging de requests
-app.Use(async (context, next) =>
-{
-    var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
-    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-    await next();
-
-    stopwatch.Stop();
-    logger.LogInformation(
-        "HTTP {Method} {Path} responded {StatusCode} in {ElapsedMilliseconds}ms",
-        context.Request.Method,
-        context.Request.Path,
-        context.Response.StatusCode,
-        stopwatch.ElapsedMilliseconds);
-});
-
-// Middleware de autenticación y autorización
+// Authentication & Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 
-// Información básica de la API
-app.MapGet("/info", () => new
-{
-    Application = "Library Management API",
-    Version = "1.0.0",
-    Environment = app.Environment.EnvironmentName,
-    Timestamp = DateTime.UtcNow,
-    Features = new[]
-    {
-        "JWT Authentication",
-        "Role-based Authorization",
-        "MongoDB Integration",
-        "Comprehensive Logging",
-        "Rate Limiting",
-        "Security Headers"
-    }
-}).AllowAnonymous();
-
 // Health check
 app.MapGet("/health", () => new
 {
     Status = "Healthy",
-    Timestamp = DateTime.UtcNow
-}).AllowAnonymous();
+    Timestamp = DateTime.UtcNow,
+    Environment = app.Environment.EnvironmentName
+}).AllowAnonymous().RequireRateLimiting("ReadPolicy");
 
-// Inicialización de MongoDB y datos semilla
+// Inicialización de MongoDB
 using (var scope = app.Services.CreateScope())
 {
     try
@@ -302,18 +316,19 @@ using (var scope = app.Services.CreateScope())
             {
                 Username = "admin",
                 Email = "admin@biblioteca.com",
-                Role = "Admin"
+                Role = "Administrador"
             };
 
             await userService.CreateUserAsync(defaultAdmin, "Admin123!");
-            logger.LogInformation("Usuario administrador por defecto creado: admin/Admin123!");
+            logger.LogInformation("Usuario administrador por defecto creado");
         }
     }
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "Error durante la inicialización de la aplicación");
+        logger.LogError(ex, "Error durante la inicialización");
+        throw;
     }
 }
 
-app.Run();
+await app.RunAsync();

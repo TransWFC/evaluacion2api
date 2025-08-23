@@ -60,5 +60,46 @@ namespace LibraryApp.Services
 
             return result.ModifiedCount > 0;
         }
+
+        /// Obtiene todos los usuarios con un rol específico
+        public async Task<IEnumerable<User>> GetUserByRoleAsync(string role)
+        {
+            return await _users.Find(u => u.Role == role && u.IsActive)
+                .ToListAsync();
+        }
+
+        /// Obtiene todos los usuarios activos
+        public async Task<IEnumerable<User>> GetAllUsersAsync()
+        {
+            return await _users.Find(u => u.IsActive)
+                .ToListAsync();
+        }
+
+        /// Actualiza el rol de un usuario
+        public async Task<bool> UpdateUserRoleAsync(string userId, string newRole)
+        {
+            var allowedRoles = new[] { "Administrador" };
+
+            if (!allowedRoles.Contains(newRole))
+            {
+                return false;
+            }
+
+            var update = Builders<User>.Update
+                .Set(u => u.Role, newRole);
+
+            var result = await _users.UpdateOneAsync(
+                u => u.Id == userId,
+                update);
+
+            return result.ModifiedCount > 0;
+        }
+
+        /// Obtiene un usuario por ID
+        public async Task<User?> GetUserByIdAsync(string userId)
+        {
+            return await _users.Find(u => u.Id == userId && u.IsActive)
+                .FirstOrDefaultAsync();
+        }
     }
 }

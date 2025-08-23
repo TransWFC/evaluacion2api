@@ -4,7 +4,6 @@ namespace LibraryApp.Services
 {
     public static class EmailValidator
     {
-        // Patrón simple para validar emails (puedes ajustarlo según tus necesidades)
         private static readonly Regex EmailRegex = new Regex(
             @"^[^@\s]+@[^@\s]+\.[^@\s]+$",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
